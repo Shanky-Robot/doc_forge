@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Moon, Sun, Settings2, FileText, UploadCloud, CheckCircle2, FileUp, X, StopCircle, Download } from 'lucide-react';
 import { checkConnection } from './lib/llm';
-import { runPreProcessing, runFinalGeneration, generateDocx, generatePdf, type GeneratedData, type GenerationResult } from './lib/processor';
+import { runPreProcessing, runFinalGeneration, generateDocx, generatePdf, generatePptx, type GeneratedData, type GenerationResult } from './lib/processor';
 import { useAppStore } from './store/useAppStore';
 import './index.css';
 
@@ -91,7 +91,7 @@ function App() {
   const [errorText, setErrorText] = useState<string | null>(null);
 
   // Output State
-  const [outputFormat, setOutputFormat] = useState<'docx' | 'pdf'>('docx');
+  const [outputFormat, setOutputFormat] = useState<'docx' | 'pdf' | 'pptx'>('docx');
   const [applyPolish, setApplyPolish] = useState(false);
   const [generatedData, setGeneratedData] = useState<GeneratedData | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -100,6 +100,17 @@ function App() {
   useEffect(() => {
     document.documentElement.className = theme;
   }, [theme]);
+
+  // Output format handling
+  useEffect(() => {
+    if (!isProcessingRef.current) {
+      if (outputType === 'PRESENTATION' && outputFormat !== 'pptx' && outputFormat !== 'pdf') {
+        setOutputFormat('pptx');
+      } else if (outputType !== 'PRESENTATION' && outputFormat === 'pptx') {
+        setOutputFormat('docx');
+      }
+    }
+  }, [outputType]);
 
   // Compatibility: migrate legacy llama.cpp provider selection to Local Server.
   useEffect(() => {
@@ -190,14 +201,16 @@ function App() {
     setFiles(files.filter((_, i) => i !== index));
   };
 
-  const triggerDownload = async (data: GeneratedData, format: 'docx' | 'pdf') => {
+  const triggerDownload = async (data: GeneratedData, format: 'docx' | 'pdf' | 'pptx') => {
     setIsDownloading(true);
     try {
       let blob: Blob;
       if (format === 'docx') {
         blob = await generateDocx(data);
-      } else {
+      } else if (format === 'pdf') {
         blob = await generatePdf(data);
+      } else {
+        blob = await generatePptx(data);
       }
 
       const url = window.URL.createObjectURL(blob);
@@ -597,7 +610,8 @@ function App() {
                 { id: 'BRD', title: 'Business Requirements (BRD)', desc: 'High-level business needs, executive audience.' },
                 { id: 'FRD', title: 'Functional Requirements (FRD)', desc: 'Detailed functional behavior, system requirements.' },
                 { id: 'PRD', title: 'Product Requirements (PRD)', desc: 'Product vision, features, and user flow.' },
-                { id: 'CRD', title: 'Change Request (CRD)', desc: 'Specific changes, rollback plans, impact analysis.' }
+                { id: 'CRD', title: 'Change Request (CRD)', desc: 'Specific changes, rollback plans, impact analysis.' },
+                { id: 'PRESENTATION', title: 'Project Presentation (Pitch Deck)', desc: 'Solutions-provider partnership pitch with layout blueprints, chart mappings, and AI graphic slots.' }
               ].map(type => (
                 <label
                   key={type.id}
@@ -628,8 +642,17 @@ function App() {
             <div className="input-group mb-4">
               <label className="input-label">Select Base Template</label>
               <select className="input-field" value={baseTemplate} onChange={e => setBaseTemplate(e.target.value)}>
-                <option value="default">Default {outputType} Template</option>
-                <option value="enterprise">Enterprise Standard v2</option>
+                {outputType === 'PRESENTATION' ? (
+                  <>
+                    <option value="default">Default Presentation Template</option>
+                    <option value="enterprise">Enterprise Slide Deck</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="default">Default {outputType} Template</option>
+                    <option value="enterprise">Enterprise Standard v2</option>
+                  </>
+                )}
                 <option value="custom">Custom Upload...</option>
               </select>
             </div>
@@ -648,12 +671,12 @@ function App() {
                   style={{ padding: '1rem', minHeight: '120px' }}
                 >
                   <FileUp size={24} className="icon" />
-                  <p style={{ fontSize: '0.875rem' }}>Upload Custom .docx Template</p>
+                  <p style={{ fontSize: '0.875rem' }}>Upload Custom {outputType === 'PRESENTATION' ? 'Template (.pptx, .key)' : '.docx Template'}</p>
                   <label className="btn btn-add mt-2" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', cursor: 'pointer' }}>
                     Browse
                     <input
                       type="file"
-                      accept=".docx"
+                      accept={outputType === 'PRESENTATION' ? ".pptx,.key" : ".docx"}
                       hidden
                       onChange={e => {
                         if (e.target.files && e.target.files.length > 0) {
@@ -710,22 +733,45 @@ function App() {
             <div>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>Output Format:</span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
-                  <input
-                    type="radio"
-                    name="format"
-                    checked={outputFormat === 'docx'}
-                    onChange={() => setOutputFormat('docx')}
-                  /> .docx
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
-                  <input
-                    type="radio"
-                    name="format"
-                    checked={outputFormat === 'pdf'}
-                    onChange={() => setOutputFormat('pdf')}
-                  /> .pdf
-                </label>
+                {outputType === 'PRESENTATION' ? (
+                  <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
+                      <input
+                        type="radio"
+                        name="format"
+                        checked={outputFormat === 'pptx'}
+                        onChange={() => setOutputFormat('pptx')}
+                      /> .pptx
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
+                      <input
+                        type="radio"
+                        name="format"
+                        checked={outputFormat === 'pdf'}
+                        onChange={() => setOutputFormat('pdf')}
+                      /> .pdf
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
+                      <input
+                        type="radio"
+                        name="format"
+                        checked={outputFormat === 'docx'}
+                        onChange={() => setOutputFormat('docx')}
+                      /> .docx
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.875rem' }}>
+                      <input
+                        type="radio"
+                        name="format"
+                        checked={outputFormat === 'pdf'}
+                        onChange={() => setOutputFormat('pdf')}
+                      /> .pdf
+                    </label>
+                  </>
+                )}
               </div>
 
               <div style={{ marginTop: '0.5rem' }} title={isProcessing ? "Once processing starts, this option cannot be changed." : ""}>
@@ -858,14 +904,25 @@ function App() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  className="btn btn-outline"
-                  style={{ backgroundColor: 'var(--color-surface-card)', borderColor: 'var(--color-success)', color: 'var(--color-success)', padding: '0.5rem 1rem' }}
-                  onClick={() => triggerDownload(generatedData, 'docx')}
-                  disabled={isDownloading}
-                >
-                  {isDownloading ? 'Building...' : `Download DOCX`}
-                </button>
+                {outputType === 'PRESENTATION' ? (
+                  <button
+                    className="btn btn-outline"
+                    style={{ backgroundColor: 'var(--color-surface-card)', borderColor: 'var(--color-success)', color: 'var(--color-success)', padding: '0.5rem 1rem' }}
+                    onClick={() => triggerDownload(generatedData, 'pptx')}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? 'Building...' : `Download PPTX`}
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-outline"
+                    style={{ backgroundColor: 'var(--color-surface-card)', borderColor: 'var(--color-success)', color: 'var(--color-success)', padding: '0.5rem 1rem' }}
+                    onClick={() => triggerDownload(generatedData, 'docx')}
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? 'Building...' : `Download DOCX`}
+                  </button>
+                )}
                 <button
                   className="btn btn-outline"
                   style={{ backgroundColor: 'var(--color-surface-card)', borderColor: 'var(--color-success)', color: 'var(--color-success)', padding: '0.5rem 1rem' }}

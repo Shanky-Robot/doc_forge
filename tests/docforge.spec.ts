@@ -103,7 +103,7 @@ test.describe('Suite 1: Base UI & Form Validation', () => {
     await expect(page).toHaveTitle(/DocForge/i);
     await expect(SEL.title(page)).toHaveText(/DocForge/);
     await expect(SEL.footer(page)).toBeVisible();
-    await expect(SEL.footer(page)).toContainText(/Designed & Built by Shanky Robot/i);
+    await expect(SEL.footer(page)).toContainText(/Designed & Built by Shanky B\./i);
     // Disclaimer copy that warns users to review [CLARIFICATION NEEDED] tags
     await expect(SEL.footer(page)).toContainText(/CLARIFICATION NEEDED/i);
 
@@ -337,5 +337,44 @@ test.describe('Suite 7: Advanced Edge Cases', () => {
     // FIX: Assert the user-visible error text appears instead of a strict CSS toast class
     await expect(page.getByText(/Processing Failed/i)).toBeVisible();
     await expect(SEL.progressBar(page)).toHaveCount(0);
+  });
+});
+
+/* ============================================================
+ * Suite 8 — Project Presentation Pipeline
+ * ============================================================ */
+test.describe('Suite 8: Project Presentation Pipeline', () => {
+
+  test('generates a presentation and exposes the .pptx download', async ({ page }) => {
+    await mockLlmCompletions(page, '## Slide Content\n\nMocked slide content.');
+
+    await SEL.projectName(page).fill('Pitch Deck');
+    await SEL.creatorName(page).fill('Sales Rep');
+    await uploadInMemoryFile(page, 'source.txt', 'Product capabilities for presentation.');
+
+    // Select the PRESENTATION output type
+    await page.locator('input[name="outputType"][value="PRESENTATION"]').check();
+    
+    // Check that we can select the custom template and upload a .pptx
+    await page.locator('select.input-field').selectOption('custom');
+    
+    // We mock upload a .pptx template
+    const fileInput = page.locator('input[type="file"][accept=".pptx,.key"]');
+    await fileInput.setInputFiles({
+      name: 'template.pptx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      buffer: Buffer.from('mock pptx', 'utf-8'),
+    });
+    
+    await SEL.modeSemantic(page).check();
+    const autoApprove = SEL.autoApprove(page);
+    await autoApprove.check();
+
+    await SEL.processBtn(page).click();
+
+    // Verify .pptx output format is visible
+    await expect(page.getByRole('button', { name: /Download PPTX/i })).toBeVisible({ timeout: 30_000 });
+    // And PDF is also visible
+    await expect(page.getByRole('button', { name: /Download PDF/i })).toBeVisible();
   });
 });

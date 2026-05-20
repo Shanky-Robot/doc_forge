@@ -93,23 +93,7 @@ function parseInlineToDocxTextRuns(text: string): TextRun[] {
 
 // --- Table & Heading Helpers ---
 
-function isTableRow(line: string): boolean {
-  return line.trim().startsWith('|') && line.trim().endsWith('|');
-}
-
-function isSeparatorRow(line: string): boolean {
-  return /^\|\s*[-:]+\s*(\|\s*[-:]+\s*)+\|$/.test(line.trim());
-}
-
-function parseMarkdownTable(lines: string[]): { headers: string[], rows: string[][] } | null {
-  if (lines.length < 3) return null;
-  if (!isTableRow(lines[0]) || !isSeparatorRow(lines[1])) return null;
-  const headers = lines[0].split('|').map(h => h.trim()).filter(h => h);
-  const rows = lines.slice(2)
-    .filter(l => isTableRow(l))
-    .map(l => l.split('|').map(c => c.trim()).filter(c => c));
-  return { headers, rows };
-}
+// Removed parseMarkdownTable to fix unused variable error
 
 function getHeadingLevel(header: string, outputType: string): 1 | 2 | 3 {
   if (/^\d+\.\d+/.test(header) || header.startsWith('###')) return 3;
@@ -278,7 +262,7 @@ async function generateDocxWorker(data: any): Promise<Blob> {
         if (line.match(/^[|-\s:]+$/)) continue;
         
         const rowContent = line.replace(/^\|/, '').replace(/\|$/, '');
-        let cells = rowContent.split('|').map(c => c.trim());
+        let cells = rowContent.split('|').map((c: string) => c.trim());
         if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
         if (cells.length > 0 && cells[0] === '') cells.shift();
         
@@ -581,7 +565,7 @@ async function generatePdfWorker(data: any): Promise<Blob> {
         if (line.match(/^[|-\s:]+$/)) continue;
         
         const rowContent = line.replace(/^\|/, '').replace(/\|$/, '');
-        let cells = rowContent.split('|').map(c => c.trim());
+        let cells = rowContent.split('|').map((c: string) => c.trim());
         if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
         if (cells.length > 0 && cells[0] === '') cells.shift();
         

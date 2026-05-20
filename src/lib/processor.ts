@@ -1,5 +1,6 @@
 import { generateCompletion, type LLMConfig } from './llm';
 import { chunkText } from './rag';
+import pptxgen from 'pptxgenjs';
 import DOMPurify from 'dompurify';
 
 function safeSanitize(input: string): string {
@@ -74,6 +75,7 @@ export async function runPreProcessing({ files, outputType, llmConfig, onProgres
           who requested the change, impact on scope/budget/timeline,
           affected requirement IDs, and rollback considerations.
           Extract each change as: "Original: [X]. Proposed: [Y]. Reason: [Z]."`,
+      PRESENTATION: `Focus on: executive problem statement, value proposition, technical solution architecture, implementation timeline, financial/value realization metrics, and slide visual presentation concepts.`
     };
 
     const focusInstruction = extractionFocus[outputType] || extractionFocus.BRD;
@@ -255,6 +257,48 @@ DOCUMENT-TYPE-SPECIFIC LANGUAGE RULES:
 
     if (baseTemplate === 'custom' && templateFile) {
       templateText = await executeWorker('EXTRACT_TEXT', { file: templateFile });
+    } else if (baseTemplate === 'enterprise' && outputType === 'PRESENTATION') {
+      templateText = `Slide 1: Title Slide
+[LAYOUT: TITLE_SLIDE]
+- Title: \${projectName}
+- Subtitle: Executive Pitch Deck
+- Visual: [High-fidelity description for AI image generation of a professional business cover]
+---
+Slide 2: Executive Problem Statement
+[LAYOUT: TWO_COLUMN_SPLIT]
+- Title: The Core Challenge
+- Bullet points:
+- Visual/Chart: [JSON dataset or description for market pain points]
+---
+Slide 3: Value Proposition
+[LAYOUT: STANDARD_CONTENT]
+- Title: Our Solution
+- Bullet points:
+- Visual/Chart: [Iconography description for key value drivers]
+---
+Slide 4: Technical Solution Architecture
+[LAYOUT: TWO_COLUMN_SPLIT]
+- Title: How It Works
+- Bullet points:
+- Visual/Chart: [High-level architectural diagram description]
+---
+Slide 5: Implementation Timeline
+[LAYOUT: FULL_WIDTH_VISUAL]
+- Title: Roadmap to Success
+- Bullet points:
+- Visual/Chart: [JSON dataset or table description for project milestones]
+---
+Slide 6: Financial & Value Realization
+[LAYOUT: TWO_COLUMN_SPLIT]
+- Title: ROI & Business Impact
+- Bullet points:
+- Visual/Chart: [JSON dataset for cost-benefit metrics]
+---
+Slide 7: Next Steps & Partnership
+[LAYOUT: TITLE_SLIDE]
+- Title: Let's Build Together
+- Subtitle: Proposed Next Steps
+- Visual: [Handshake or partnership visual description]`;
     } else if (baseTemplate === 'enterprise' && outputType === 'BRD') {
       templateText = `Document Title: BRD — \${projectName}
 Project Name: \${projectName}
@@ -1127,6 +1171,42 @@ v1.0 | \${currentDate} | \${creatorName} | Initial draft
 Reviewer Name | Role | Status (Approved / Pending / Rejected) | Date | Comments
 [Name] | [Role] | Pending | |
 [Name] | [Role] | Pending | |`;
+      } else if (outputType === 'PRESENTATION') {
+        templateText = `Slide 1: Title
+[LAYOUT: TITLE_SLIDE]
+- Title: \${projectName}
+- Subtitle: Project Presentation
+- Visual: [Cover image description]
+---
+Slide 2: Overview
+[LAYOUT: STANDARD_CONTENT]
+- Title: Executive Overview
+- Bullet points:
+- Visual/Chart: [Overview graphic description]
+---
+Slide 3: Problem Statement
+[LAYOUT: TWO_COLUMN_SPLIT]
+- Title: The Problem
+- Bullet points:
+- Visual/Chart: [Problem visual description]
+---
+Slide 4: Solution
+[LAYOUT: STANDARD_CONTENT]
+- Title: Proposed Solution
+- Bullet points:
+- Visual/Chart: [Solution visual description]
+---
+Slide 5: Timeline & Roadmap
+[LAYOUT: FULL_WIDTH_VISUAL]
+- Title: Project Timeline
+- Bullet points:
+- Visual/Chart: [Milestone table or timeline description]
+---
+Slide 6: Conclusion
+[LAYOUT: TITLE_SLIDE]
+- Title: Conclusion & Next Steps
+- Subtitle:
+- Visual: [Closing image description]`;
       } else {
         templateText = `Document Title: ${outputType} — \${projectName}
 Project Name: \${projectName}
@@ -1299,6 +1379,7 @@ ${middleSample}`;
           what the original approved state was, who requested the
           change, why it is needed, and what the impact is.
           This summary will anchor a CRD.`,
+        PRESENTATION: `Focus your summary on: executive summary overview, core pain points, solution capabilities, and key milestone schedules suitable for a partnership pitch deck.`
       };
 
       const summaryFocus = summaryFocusByType[outputType] || summaryFocusByType.BRD;
@@ -1663,4 +1744,47 @@ export async function generateDocx(data: GeneratedData): Promise<Blob> {
 
 export async function generatePdf(data: GeneratedData): Promise<Blob> {
   return await executeWorker('GENERATE_PDF', { data });
+}
+
+export async function generatePptx(data: GeneratedData): Promise<Blob> {
+  const pres = new pptxgen();
+  pres.title = data.projectName || "Presentation";
+
+  // Simple title slide
+  const coverSlide = pres.addSlide();
+  coverSlide.addText(`${data.outputType} Document`, { x: 0.5, y: 1.5, w: '90%', h: 1, fontSize: 36, bold: true, align: 'center' });
+  coverSlide.addText(data.projectName || "Project", { x: 0.5, y: 2.5, w: '90%', h: 1, fontSize: 24, align: 'center' });
+
+  // Map each section to a slide
+  for (const section of data.sections || []) {
+    const slide = pres.addSlide();
+    slide.addText(section.header.replace(/^#+\s*/, ''), { x: 0.5, y: 0.5, w: '90%', h: 0.8, fontSize: 24, bold: true });
+    
+    // Split section content into lines
+    const lines = section.content.split('\n').filter((l: string) => l.trim().length > 0 && !l.startsWith('```'));
+    
+    let yPos = 1.5;
+    for (const line of lines.slice(0, 10)) { // limit lines to avoid overflowing slide
+      let text = line.replace(/[*_~`]/g, '').trim();
+      let isBullet = false;
+      if (text.startsWith('- ') || text.startsWith('* ')) {
+        isBullet = true;
+        text = text.substring(2);
+      } else if (text.startsWith('### ') || text.startsWith('## ') || text.startsWith('# ')) {
+        text = text.replace(/^#+\s*/, '');
+      }
+      
+      slide.addText(text, { 
+        x: isBullet ? 1 : 0.5, 
+        y: yPos, 
+        w: '90%', 
+        h: 0.5, 
+        fontSize: isBullet ? 14 : 16, 
+        bullet: isBullet 
+      });
+      yPos += 0.4;
+    }
+  }
+
+  return (await pres.write({ outputType: 'blob' })) as unknown as Blob;
 }
