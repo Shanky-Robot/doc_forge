@@ -5,6 +5,7 @@ import { runPreProcessing, runFinalGeneration, generateDocx, generatePdf, genera
 import { useAppStore } from './store/useAppStore';
 import { useSwarmStore } from './store/useSwarmStore';
 import { runSwarmGeneration } from './lib/agents/orchestrator';
+import { executeWebSearch } from './lib/researcher';
 import { ReviewPanel } from './components/ReviewPanel';
 import './index.css';
 
@@ -33,8 +34,6 @@ function App() {
     processingMode, setProcessingMode,
     creatorName, setCreatorName,
     enableWebResearch, setEnableWebResearch,
-    searchProvider, setSearchProvider,
-    searchApiKey, setSearchApiKey,
     searchServerUrl, setSearchServerUrl,
     fetchImages, setFetchImages,
     fetchInfographics, setFetchInfographics
@@ -167,6 +166,24 @@ function App() {
     setTimeout(() => setToastMessage(null), 5000);
   };
 
+  const handleTestSearchConnection = async () => {
+    showToast('Testing Web Search connection...');
+    try {
+      const results = await executeWebSearch(['latest tech news'], {
+        searchServerUrl,
+        fetchImages: false,
+        fetchInfographics: false
+      });
+      if (results[0].results.includes('[Search failed:')) {
+        showToast(`❌ Web Search failed: ${results[0].results}`);
+      } else {
+        showToast(`✅ Web Search connected! Success.`);
+      }
+    } catch (e: any) {
+      showToast(`❌ Web Search error: ${e.message}`);
+    }
+  };
+
   const handleTestConnection = async () => {
     if (selectedProvider !== 'Local Server' && !apiKey.trim()) {
       setConnectionStatus('error');
@@ -295,8 +312,6 @@ function App() {
         projectName,
         enableWebResearch,
         researchConfig: {
-          searchProvider,
-          searchApiKey,
           searchServerUrl,
           fetchImages,
           fetchInfographics
@@ -379,8 +394,6 @@ function App() {
           signal,
           enableWebResearch,
           researchConfig: {
-            searchProvider,
-            searchApiKey,
             searchServerUrl,
             fetchImages,
             fetchInfographics
@@ -597,16 +610,8 @@ function App() {
             </div>
             {enableWebResearch && (
             <div className="connection-row" style={{ flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center' }}>
-              <div className="input-group" style={{ minWidth: '200px' }}>
-                <label className="input-label">Search Provider</label>
-                <select className="input-field" value={searchProvider} onChange={(e) => setSearchProvider(e.target.value)}>
-                  <option value="Local MCP Server">Local MCP Server</option>
-                  <option value="Tavily API">Tavily API</option>
-                  <option value="Serper API">Serper API</option>
-                </select>
-              </div>
               <div className="input-group" style={{ minWidth: '250px', flex: 1 }}>
-                <label className="input-label">{searchProvider === 'Local MCP Server' ? 'MCP Server URL' : 'API Endpoint (optional)'}</label>
+                <label className="input-label">Local MCP Bridge URL</label>
                 <input
                   type="text"
                   className="input-field"
@@ -614,17 +619,6 @@ function App() {
                   onChange={e => setSearchServerUrl(e.target.value)}
                 />
               </div>
-              {searchProvider !== 'Local MCP Server' && (
-                <div className="input-group" style={{ minWidth: '250px' }}>
-                  <label>Search API Key</label>
-                  <input
-                    type="password"
-                    value={searchApiKey}
-                    onChange={(e) => setSearchApiKey(e.target.value)}
-                    placeholder="Enter API Key"
-                  />
-                </div>
-              )}
               
               <div className="input-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '200px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
@@ -637,7 +631,7 @@ function App() {
 
               <button
                 className="btn btn-outline mb-4"
-                onClick={() => showToast('Test search initiated... (Check console or network tab)')}
+                onClick={handleTestSearchConnection}
               >
                 Test Search Connection
               </button>
