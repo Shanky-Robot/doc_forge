@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "web-search": {
+      "command": "node",
+      "args": [
+        "/Users/shanky/Documents/web-search-mcp-main/dist/index.js"
+      ]
+    }
+  }
+} 
