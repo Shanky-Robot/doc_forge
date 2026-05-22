@@ -1,3 +1,0 @@
-async function e(e,t){try{let n=await fetch(`${t.replace(/\/$/,``)}/tools/call`,{method:`POST`,headers:{"Content-Type":`application/json`},body:JSON.stringify({name:`web-search`,arguments:{query:e}})});if(!n.ok)return console.warn(`MCP search failed with status: ${n.status}`),``;let r=await n.json();return r&&r.content&&Array.isArray(r.content)?r.content.map(e=>e.text||JSON.stringify(e)).join(`
-
-`):JSON.stringify(r)}catch(e){return console.warn(`Failed to connect to local MCP web-search server:`,e),``}}export{e as executeMcpSearch};

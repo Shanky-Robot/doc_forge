@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Moon, Sun, Settings2, FileText, UploadCloud, CheckCircle2, FileUp, X, StopCircle, Download } from 'lucide-react';
+import { Moon, Sun, Settings2, FileText, UploadCloud, CheckCircle2, FileUp, X, StopCircle, Download, Globe } from 'lucide-react';
 import { checkConnection } from './lib/llm';
 import { runPreProcessing, runFinalGeneration, generateDocx, generatePdf, generatePptx, type GeneratedData, type GenerationResult } from './lib/processor';
 import { useAppStore } from './store/useAppStore';
+import { useSwarmStore } from './store/useSwarmStore';
+import { runSwarmGeneration } from './lib/agents/orchestrator';
+import { ReviewPanel } from './components/ReviewPanel';
 import './index.css';
 
 const AI_PROVIDERS = [
@@ -28,12 +31,23 @@ function App() {
     baseTemplate, setBaseTemplate,
     templateFile, setTemplateFile,
     processingMode, setProcessingMode,
-    creatorName, setCreatorName
+    creatorName, setCreatorName,
+    enableWebResearch, setEnableWebResearch,
+    searchProvider, setSearchProvider,
+    searchApiKey, setSearchApiKey,
+    searchServerUrl, setSearchServerUrl,
+    fetchImages, setFetchImages,
+    fetchInfographics, setFetchInfographics
   } = useAppStore();
 
   const [showConnection, setShowConnection] = useState(false);
+  const [showWebResearch, setShowWebResearch] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [needsReanalysis, setNeedsReanalysis] = useState(false);
+
+  // Swarm State
+  const { swarmEnabled, setSwarmEnabled, agentLogs } = useSwarmStore();
+  const [swarmDataPendingReview, setSwarmDataPendingReview] = useState<GeneratedData | null>(null);
 
   // HITL State
   const [autoApprove, setAutoApprove] = useState(true);
@@ -50,7 +64,17 @@ function App() {
   const [preProcessTime, setPreProcessTime] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const formatTime = (seconds: number) => new Date(seconds * 1000).toISOString().substring(14, 19);
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const mStr = m.toString().padStart(2, '0');
+    const sStr = s.toString().padStart(2, '0');
+    if (h > 0) {
+      return `${h.toString().padStart(2, '0')}:${mStr}:${sStr}`;
+    }
+    return `${mStr}:${sStr}`;
+  };
 
   useEffect(() => {
     isProcessingRef.current = isProcessing;
@@ -237,6 +261,7 @@ function App() {
     setStatusText('Starting Pre-Processing...');
     setErrorText(null);
     setGeneratedData(null);
+    setSwarmDataPendingReview(null);
 
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
@@ -266,7 +291,16 @@ function App() {
         outputType,
         llmConfig,
         onProgress,
-        signal
+        signal,
+        projectName,
+        enableWebResearch,
+        researchConfig: {
+          searchProvider,
+          searchApiKey,
+          searchServerUrl,
+          fetchImages,
+          fetchInfographics
+        }
       });
 
       setCompiledContext(context);
@@ -330,23 +364,52 @@ function App() {
     });
 
     try {
-      const result: GenerationResult = await runFinalGeneration({
-        projectName,
-        creatorName,
-        compiledContext: context,
-        outputType,
-        baseTemplate,
-        templateFile,
-        processingMode,
-        llmConfig,
-        applyPolish,
-        onProgress,
-        signal
-      });
+      let result: GenerationResult;
+      
+      if (swarmEnabled) {
+        result = await runSwarmGeneration({
+          projectName,
+          creatorName,
+          compiledContext: context,
+          outputType,
+          baseTemplate,
+          templateFile,
+          llmConfig,
+          onProgress,
+          signal,
+          enableWebResearch,
+          researchConfig: {
+            searchProvider,
+            searchApiKey,
+            searchServerUrl,
+            fetchImages,
+            fetchInfographics
+          }
+        });
+      } else {
+        result = await runFinalGeneration({
+          projectName,
+          creatorName,
+          compiledContext: context,
+          outputType,
+          baseTemplate,
+          templateFile,
+          processingMode,
+          llmConfig,
+          applyPolish,
+          onProgress,
+          signal
+        });
+      }
 
       if (result.success) {
-        setGeneratedData(result.data);
-        setStatusText('Done');
+        if (swarmEnabled && result.data) {
+          setSwarmDataPendingReview(result.data);
+          setStatusText('Pending Review');
+        } else {
+          setGeneratedData(result.data);
+          setStatusText('Done');
+        }
       } else if (result.reason === 'aborted') {
         setStatusText('Processing Halted by User');
       } else {
@@ -399,7 +462,8 @@ function App() {
   };
 
   const getCurrentStep = () => {
-    if (generatedData) return 4;
+    if (generatedData) return 5;
+    if (swarmDataPendingReview) return 4;
     if (isProcessing) return 3;
     if (files.length > 0) return 2;
     return 1;
@@ -410,7 +474,8 @@ function App() {
     { num: 1, label: 'Upload' },
     { num: 2, label: 'Configure' },
     { num: 3, label: 'Process' },
-    { num: 4, label: 'Download' }
+    { num: 4, label: 'Review' },
+    { num: 5, label: 'Download' }
   ];
 
   return (
@@ -433,6 +498,10 @@ function App() {
             <button className="btn btn-outline" onClick={() => setShowConnection(!showConnection)}>
               <Settings2 size={18} />
               <span>Connection</span>
+            </button>
+            <button className="btn btn-outline" onClick={() => setShowWebResearch(!showWebResearch)}>
+              <Globe size={18} />
+              <span>Web Research</span>
             </button>
             <button className="btn btn-outline p-2" onClick={handleThemeToggle} aria-label="Toggle Theme">
               {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
@@ -507,6 +576,74 @@ function App() {
               </button>
             </div>
             <p className="text-sm text-muted">If both an External AI and Local Fallback are configured, DocForge will prioritize the external provider and automatically fallback to local if limits are reached or an outage occurs.</p>
+          </div>
+        )}
+
+        {/* Web Research Panel */}
+        {showWebResearch && (
+          <div className="card connection-panel mt-4">
+            <h2 className="card-title">
+              <Globe size={20} className="icon" />
+              Web Research & Enrichment
+            </h2>
+            <div className="mb-4">
+               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={enableWebResearch}
+                    onChange={(e) => setEnableWebResearch(e.target.checked)}
+                  /> Enable Internet Research (Fetch external data and images during processing)
+                </label>
+            </div>
+            {enableWebResearch && (
+            <div className="connection-row" style={{ flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'center' }}>
+              <div className="input-group" style={{ minWidth: '200px' }}>
+                <label className="input-label">Search Provider</label>
+                <select className="input-field" value={searchProvider} onChange={(e) => setSearchProvider(e.target.value)}>
+                  <option value="Local MCP Server">Local MCP Server</option>
+                  <option value="Tavily API">Tavily API</option>
+                  <option value="Serper API">Serper API</option>
+                </select>
+              </div>
+              <div className="input-group" style={{ minWidth: '250px', flex: 1 }}>
+                <label className="input-label">{searchProvider === 'Local MCP Server' ? 'MCP Server URL' : 'API Endpoint (optional)'}</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  value={searchServerUrl}
+                  onChange={e => setSearchServerUrl(e.target.value)}
+                />
+              </div>
+              {searchProvider !== 'Local MCP Server' && (
+                <div className="input-group" style={{ minWidth: '250px' }}>
+                  <label>Search API Key</label>
+                  <input
+                    type="password"
+                    value={searchApiKey}
+                    onChange={(e) => setSearchApiKey(e.target.value)}
+                    placeholder="Enter API Key"
+                  />
+                </div>
+              )}
+              
+              <div className="input-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '200px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+                    <input type="checkbox" checked={fetchImages} onChange={(e) => setFetchImages(e.target.checked)} /> Fetch Images
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+                    <input type="checkbox" checked={fetchInfographics} onChange={(e) => setFetchInfographics(e.target.checked)} /> Fetch Infographics
+                  </label>
+              </div>
+
+              <button
+                className="btn btn-outline mb-4"
+                onClick={() => showToast('Test search initiated... (Check console or network tab)')}
+              >
+                Test Search Connection
+              </button>
+            </div>
+            )}
+            <p className="text-sm text-muted">Web Research will query the selected provider for up-to-date information and inject the results into your document context before generation.</p>
           </div>
         )}
 
@@ -729,6 +866,20 @@ function App() {
             </div>
           </div>
 
+          <div className="mb-6 border border-blue-500/30 rounded-lg p-4 bg-blue-900/10">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, cursor: 'pointer', color: 'var(--color-primary)' }}>
+              <input
+                type="checkbox"
+                checked={swarmEnabled}
+                onChange={(e) => setSwarmEnabled(e.target.checked)}
+                disabled={isProcessing}
+              /> Enable Multi-Agent Swarm Mode (Advanced)
+            </label>
+            <p className="text-sm text-muted mt-2">
+              Bypasses the standard pipeline to deploy a swarm of 5 AI agents (Researcher, Strategist, Drafter, QA, Verifier) to iteratively draft, review, and perfect your document. Includes a post-generation review step to learn your preferences.
+            </p>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: '1rem' }}>
             <div>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -875,6 +1026,19 @@ function App() {
             </div>
           )}
 
+          {isProcessing && swarmEnabled && (
+            <div className="mt-4 p-4 bg-black rounded-lg border border-gray-700 font-mono text-sm max-h-60 overflow-y-auto flex flex-col gap-2">
+              <h4 className="text-green-500 mb-2 border-b border-gray-700 pb-1">Swarm Terminal Active</h4>
+              {agentLogs.slice(-10).map(log => (
+                <div key={log.id} className="text-gray-300">
+                  <span className="text-gray-500">[{new Date(log.timestamp).toLocaleTimeString()}]</span>{' '}
+                  <span className={`font-bold ${log.agent === 'QA Reviewer' ? 'text-purple-400' : log.agent === 'Drafter' ? 'text-blue-400' : log.agent === 'Researcher' ? 'text-yellow-400' : log.agent === 'Strategist' ? 'text-orange-400' : 'text-gray-400'}`}>[{log.agent}]</span>{' '}
+                  <span className={`${log.status === 'error' ? 'text-red-500' : log.status === 'success' ? 'text-green-400' : log.status === 'warning' ? 'text-yellow-500' : 'text-gray-300'}`}>{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {errorText && !isProcessing && (
             <div className="mt-4" style={{ padding: '1rem', backgroundColor: 'rgba(211, 47, 47, 0.1)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)' }}>
               <span style={{ fontWeight: 600 }}>Processing Failed: </span>
@@ -887,6 +1051,22 @@ function App() {
               <span style={{ fontWeight: 600 }}>Info: </span>
               Changes detected. Re-analyze and process to generate the updated document.
             </div>
+          )}
+
+          {swarmDataPendingReview && !isProcessing && (
+            <ReviewPanel 
+              data={swarmDataPendingReview}
+              llmConfig={{
+                localUrl: selectedProvider === 'Local Server' ? primaryUrl : fallbackUrl,
+                externalUrl: selectedProvider !== 'Local Server' ? primaryUrl : '',
+                apiKey
+              }}
+              onFinalize={(finalData) => {
+                setGeneratedData(finalData);
+                setSwarmDataPendingReview(null);
+                setStatusText('Done');
+              }}
+            />
           )}
 
           {generatedData && !isProcessing && !needsReanalysis && (

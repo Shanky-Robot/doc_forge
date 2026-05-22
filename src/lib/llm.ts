@@ -172,7 +172,8 @@ export async function generateCompletion(
   config: LLMConfig,
   messages: ChatMessage[],
   temperature = 0.3,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fastMode?: boolean
 ): Promise<string> {
 
   const callApi = async (url: string, key?: string, isExternal?: boolean) => {
@@ -261,10 +262,10 @@ export async function generateCompletion(
 
     let model = 'local-model';
     if (isExternal) {
-      if (endpoint.includes('gemini') || endpoint.includes('generativelanguage')) model = 'gemini-flash-latest';
-      else if (endpoint.includes('openai')) model = 'gpt-3.5-turbo';
-      else if (endpoint.includes('groq')) model = 'llama3-8b-8192';
-      else if (endpoint.includes('perplexity')) model = 'sonar-small-chat';
+      if (endpoint.includes('gemini') || endpoint.includes('generativelanguage')) model = fastMode ? 'gemini-1.5-flash' : 'gemini-1.5-pro';
+      else if (endpoint.includes('openai')) model = fastMode ? 'gpt-3.5-turbo' : 'gpt-4o';
+      else if (endpoint.includes('groq')) model = fastMode ? 'llama3-8b-8192' : 'llama3-70b-8192';
+      else if (endpoint.includes('perplexity')) model = fastMode ? 'sonar-small-chat' : 'sonar-medium-chat';
     }
 
     const payload = {
@@ -293,17 +294,23 @@ export async function generateCompletion(
   };
 
   // Strict fallback logic
+  const tryUrl = async (url: string | undefined, isExternal: boolean) => {
+    if (!url) throw new Error('URL not provided');
+    return await callApi(url, config.apiKey, isExternal);
+  };
+
   if (config.externalUrl && config.localUrl) {
+    const primaryUrl = fastMode ? config.localUrl : config.externalUrl;
+    const secondaryUrl = fastMode ? config.externalUrl : config.localUrl;
+    const isPrimaryExternal = fastMode ? false : true;
+    const isSecondaryExternal = fastMode ? true : false;
+    
     try {
-      return await callApi(config.externalUrl, config.apiKey, true);
+      return await tryUrl(primaryUrl, isPrimaryExternal);
     } catch (error: any) {
-      console.warn("External API failed:", error);
-
-      if (error.name === 'AbortError') {
-        throw error;
-      }
-
-      // Fallback on timeout, rate limit, or server error
+      console.warn("Primary API failed:", error);
+      if (error.name === 'AbortError') throw error;
+      
       const isNetworkOrTimeout = error.name === 'TypeError' ||
         error.message?.toLowerCase().includes('fetch') ||
         error.message?.toLowerCase().includes('network') ||
@@ -312,24 +319,22 @@ export async function generateCompletion(
       if (error.status === 429 || error.status >= 500 || isNetworkOrTimeout) {
         if (config.onFallback) config.onFallback();
         try {
-          return await callApi(config.localUrl, undefined, false);
+          return await tryUrl(secondaryUrl, isSecondaryExternal);
         } catch (localError: any) {
-          throw formatDetailedError(localError, getProviderNameFromUrl(config.localUrl));
+          throw formatDetailedError(localError, getProviderNameFromUrl(secondaryUrl));
         }
       }
-      throw formatDetailedError(error, getProviderNameFromUrl(config.externalUrl));
+      throw formatDetailedError(error, getProviderNameFromUrl(primaryUrl));
     }
   } else if (config.externalUrl) {
-    // Only External configured
     try {
-      return await callApi(config.externalUrl, config.apiKey, true);
+      return await tryUrl(config.externalUrl, true);
     } catch (error: any) {
       throw formatDetailedError(error, getProviderNameFromUrl(config.externalUrl));
     }
   } else if (config.localUrl) {
-    // Only Local configured
     try {
-      return await callApi(config.localUrl, config.apiKey, false);
+      return await tryUrl(config.localUrl, false);
     } catch (error: any) {
       throw formatDetailedError(error, getProviderNameFromUrl(config.localUrl));
     }

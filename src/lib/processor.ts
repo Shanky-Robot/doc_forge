@@ -2,6 +2,7 @@ import { generateCompletion, type LLMConfig } from './llm';
 import { chunkText } from './rag';
 import pptxgen from 'pptxgenjs';
 import DOMPurify from 'dompurify';
+import { executeWebSearch, type ResearchConfig } from './researcher';
 
 function safeSanitize(input: string): string {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -38,9 +39,12 @@ export interface PreProcessOptions {
   llmConfig: LLMConfig;
   onProgress: ProcessCallback;
   signal?: AbortSignal;
+  projectName?: string;
+  enableWebResearch?: boolean;
+  researchConfig?: ResearchConfig;
 }
 
-export async function runPreProcessing({ files, outputType, llmConfig, onProgress, signal }: PreProcessOptions): Promise<string> {
+export async function runPreProcessing({ files, outputType, llmConfig, onProgress, signal, projectName, enableWebResearch, researchConfig }: PreProcessOptions): Promise<string> {
   onProgress(10, 'Stage 1: AI Pre-Processing files...');
   let compiledContext = '';
 
@@ -153,6 +157,46 @@ export async function runPreProcessing({ files, outputType, llmConfig, onProgres
     }
   }
   
+  if (enableWebResearch && researchConfig && projectName) {
+    onProgress(90, 'Stage 1.5: Generating Web Research Queries...');
+    const queryPrompt = `Based on the following extracted context for the project "${projectName}", generate 3 to 5 highly specific search queries that would yield useful external data, industry benchmarks, or reference material to enrich this document. Output ONLY the queries, one per line. Do not number them.
+    
+    CONTEXT:
+    ${compiledContext.substring(0, 4000)}`;
+
+    try {
+      const queriesText = await generateCompletion(llmConfig, [
+        { role: 'system', content: `You are an expert search query generator.` },
+        { role: 'user', content: queryPrompt }
+      ], 0.3, signal);
+
+      const queries = queriesText.split('\n')
+        .map((q: string) => q.trim().replace(/^-/, '').replace(/^\d+\./, '').trim())
+        .filter((q: string) => q.length > 5)
+        .slice(0, 5);
+
+      if (queries.length > 0) {
+        onProgress(95, `Stage 1.5: Fetching Web Research for ${queries.length} queries...`);
+        const researchResults = await executeWebSearch(queries, researchConfig);
+        
+        let researchOutput = `\n\n### WEB RESEARCH & ENRICHMENT DATA ###\n\n`;
+        researchOutput += `The following external data was retrieved to enrich the final document:\n\n`;
+        
+        for (const res of researchResults) {
+          researchOutput += `#### Query: ${res.query}\n`;
+          researchOutput += `${res.results}\n\n`;
+          if (res.images && res.images.length > 0) {
+            researchOutput += `*Relevant Images found:* \n${res.images.map((img: string) => `![Image](${img})`).join('\n')}\n\n`;
+          }
+        }
+        compiledContext += researchOutput;
+      }
+    } catch (e) {
+       console.error("Web research phase failed:", e);
+       // Fail gracefully so the main processing can continue
+    }
+  }
+
   return compiledContext;
 }
 
